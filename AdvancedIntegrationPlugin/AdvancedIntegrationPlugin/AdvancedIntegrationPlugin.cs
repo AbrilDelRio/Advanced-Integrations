@@ -81,6 +81,7 @@ namespace CreateAdvancedIntegrationPlugin
             // Do NOT pass InitiatingUserId (or null = SYSTEM) here, or the impersonation is lost.
             IOrganizationServiceFactory serviceFactory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
             IOrganizationService service = serviceFactory.CreateOrganizationService(context.UserId);
+            ITracingService tracer = (ITracingService)serviceProvider.GetService(typeof(ITracingService));
 
             var errorLog = new StringBuilder();
             Entity mappingRecord = null;
@@ -150,7 +151,7 @@ namespace CreateAdvancedIntegrationPlugin
                 if (!isEnabled)
                     return;
 
-                AppendExecutionIdentity(context, mappingRecord, errorLog);
+                AppendExecutionIdentity(context, mappingRecord, errorLog, tracer);
 
                 // ===========================================================================
                 // [CHANGE DETECTION]
@@ -527,12 +528,14 @@ namespace CreateAdvancedIntegrationPlugin
         /// sync with the mapping (e.g. step edited by hand, or AutoRegisterPlugin failed).
         /// Warning only: never falls back to InitiatingUserId, since silently running with
         /// the caller's (lower) privileges is exactly what Run Under User is meant to avoid.
-        private void AppendExecutionIdentity(IPluginExecutionContext context, Entity mappingRecord, StringBuilder errorLog)
+        /// The run-as line goes to the Plugin Trace Log only; errorLog is written just on a
+        /// mismatch so successful runs keep logging "Executed successfully" as before.
+        private void AppendExecutionIdentity(IPluginExecutionContext context, Entity mappingRecord, StringBuilder errorLog, ITracingService tracer)
         {
             bool impersonated = context.UserId != context.InitiatingUserId;
-            errorLog.AppendLine(impersonated
-                ? $"Running as     : {context.UserId} (impersonated, initiated by {context.InitiatingUserId})"
-                : $"Running as     : {context.UserId} (Calling User)");
+            tracer?.Trace(impersonated
+                ? $"Running as: {context.UserId} (impersonated, initiated by {context.InitiatingUserId})"
+                : $"Running as: {context.UserId} (Calling User)");
 
             // Lookup not present in ColumnSet/entity -> nothing to compare against.
             if (!mappingRecord.Contains("mfd_rununderuser"))
