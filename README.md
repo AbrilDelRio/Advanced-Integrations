@@ -14,8 +14,7 @@ Lookup a `systemuser` en `mfd_advancedmapping`. AutoRegisterPlugin lo copia en
 - Vacío o limpiado → `impersonatinguserid = null` → **Calling User**.
 - Usuario deshabilitado o inexistente → el guardado del mapping falla con un mensaje claro.
 
-AdvancedIntegrationPlugin crea el servicio con `context.UserId` (el usuario impersonado)
-, escribe `Running as ...` en el Plugin Trace Log y agrega un `WARNING` al log de integración solo si el step no coincide con el mapping.
+AdvancedIntegrationPlugin crea el servicio con `context.UserId` (el usuario impersonado), escribe `Running as ...` en el Plugin Trace Log y agrega un `WARNING` al log de integración solo si el step no coincide con el mapping.
 
 ## Compilar
 
