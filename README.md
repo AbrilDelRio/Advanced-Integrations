@@ -40,3 +40,12 @@ dotnet build AdvancedIntegrationPlugin/AdvancedIntegrationPlugin.csproj -c Relea
 6. Probar: asignar un usuario, verificar en PRT que el step muestre *Run in User's Context* = ese
    usuario, disparar el evento y revisar `createdby` / `createdonbehalfby` y el log. Limpiar el
    campo y verificar que vuelva a *Calling User*.
+
+## PCF `AdvancedIntegrationconfig`
+
+Configurador visual de los mappings. Guarda con la Web API, así que dispara los mismos plugins
+que el formulario. En *General → Run under user* se elige el usuario (`mfd_RunUnderUser@odata.bind`);
+*Clear* lo vacía y el step vuelve a Calling User.
+
+Desplegar: `npm run build` y luego `pac pcf push` (o reempaquetar la solución). La versión del
+manifiesto debe subir en cada despliegue para que Dataverse tome el control nuevo.

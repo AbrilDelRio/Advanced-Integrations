@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="MFD" constructor="AdvancedIntegrationConfigurator" version="1.0.16"
+  <control namespace="MFD" constructor="AdvancedIntegrationConfigurator" version="1.0.17"
             display-name-key="Advanced Integration Configurator"
             description-key="Visual configurator for Advanced Integration mappings, triggers and conditions"
             control-type="standard">

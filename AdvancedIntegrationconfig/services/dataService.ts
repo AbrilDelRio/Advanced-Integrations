@@ -43,6 +43,7 @@ const HEADER_SELECT = [
     "mfd_eventforsourceentity", "mfd_eventtype", "mfd_destinationentity", "mfd_destinationeventtype",
     "mfd_enabled", "mfd_logusage", "mfd_sendnotificaitononerror", "_mfd_errornotificationteam_value",
     "mfd_notificationteamonerrorvia", "mfd_notifyuser", "mfd_usernotificationmehtod", "statecode",
+    "_mfd_rununderuser_value",
 ].join(",");
 const TRIGGER_SELECT = [
     "mfd_advancedintegrationtriggerid", "mfd_columnname", "mfd_tablename", "_mfd_advancedintegration_value",
@@ -111,6 +112,7 @@ export async function loadDocument(headerId: string): Promise<AdvancedMappingDoc
         header: {
             ...(header as AdvancedMapping),
             mfd_errornotificationteam: (header as any)._mfd_errornotificationteam_value ?? null,
+            mfd_rununderuser: (header as any)._mfd_rununderuser_value ?? null,
         },
         triggers: triggers as TriggerRow[],
         sourceConditions: sourceConditions as SourceConditionRow[],
@@ -128,6 +130,14 @@ function buildHeaderPayload(h: AdvancedMapping): Record<string, unknown> {
     }
     else if (h.mfd_errornotificationteam === null) {
         out["mfd_ErrorNotificationTeam@odata.bind"] = null;
+    }
+    // Run Under User -> AutoRegisterPlugin copies it to the step's impersonatinguserid.
+    // undefined = not touched (new record), null = cleared (Calling User).
+    if (h.mfd_rununderuser) {
+        out["mfd_RunUnderUser@odata.bind"] = `/systemusers(${clean(h.mfd_rununderuser)})`;
+    }
+    else if (h.mfd_rununderuser === null) {
+        out["mfd_RunUnderUser@odata.bind"] = null;
     }
     return out;
 }

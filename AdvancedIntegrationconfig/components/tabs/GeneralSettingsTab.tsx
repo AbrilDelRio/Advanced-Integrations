@@ -1,8 +1,9 @@
 import * as React from "react";
-import { TextField, Dropdown, IDropdownOption } from "@fluentui/react";
+import { TextField, Dropdown, IDropdownOption, ActionButton } from "@fluentui/react";
 import { AdvancedMapping } from "../../types";
 import { EntityPicker } from "../pickers/EntityPicker";
 import { MetaChoicePicker, MetaMultiChoicePicker } from "../pickers/MetaChoicePicker";
+import { RecordLookupPicker } from "../pickers/RecordLookupPicker";
 import { getTeams, TeamMeta } from "../../services/metadataService";
 import { Page, PageHeader, Card, FieldGrid, Field, SwitchRow, SwitchList } from "../shared/Layout";
 const HEADER_ENTITY = "mfd_advancedmapping";
@@ -43,6 +44,13 @@ export const GeneralSettingsTab: React.FC<{
           <SwitchRow title="Enabled" description="Turn this integration on or off" checked={!!header.mfd_enabled} onChange={(c) => onChange({ mfd_enabled: c })}/>
           <SwitchRow title="Log usage" description="Keep a run log for this integration" checked={!!header.mfd_logusage} onChange={(c) => onChange({ mfd_logusage: c })}/>
         </SwitchList>
+      </Card>
+
+      <Card icon="Contact" title="Run under user" subtitle="User or service account the integration runs as. Empty = Calling User">
+        <FieldGrid>
+          <Field><RecordLookupPicker label="Run under user" entity="systemuser" value={header.mfd_rununderuser ?? null} onChange={(id) => onChange({ mfd_rununderuser: id })}/></Field>
+          {header.mfd_rununderuser && (<Field><ActionButton iconProps={{ iconName: "Clear" }} text="Clear (use Calling User)" onClick={() => onChange({ mfd_rununderuser: null })}/></Field>)}
+        </FieldGrid>
       </Card>
 
       <Card icon="MailAlert" title="Error notifications">

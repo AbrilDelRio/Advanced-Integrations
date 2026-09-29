@@ -14,6 +14,9 @@ export interface AdvancedMapping {
     mfd_sendnotificaitononerror?: boolean | null;
     mfd_errornotificationteam?: string | null;
     "_mfd_errornotificationteam_value"?: string | null;
+    // Run Under User (systemuser GUID). Empty = step runs as the Calling User.
+    mfd_rununderuser?: string | null;
+    "_mfd_rununderuser_value"?: string | null;
     mfd_notificationteamonerrorvia?: string | null;
     mfd_notifyuser?: boolean | null;
     mfd_usernotificationmehtod?: string | null;
