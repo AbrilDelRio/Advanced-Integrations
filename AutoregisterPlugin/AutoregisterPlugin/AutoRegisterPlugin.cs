@@ -22,6 +22,10 @@ namespace NGMM_AutoRegisterPlugin
 
         private const string SAP_ORIGIN_FIELD = "ngmm_integrationchangeorigincode";
 
+        // Lookup (systemuser) on the mapping: user / service account the generated step runs as.
+        // Written to sdkmessageprocessingstep.impersonatinguserid. Empty = Calling User (default).
+        private const string RUN_UNDER_USER_FIELD = "mfd_rununderuser";
+
         public void Execute(IServiceProvider serviceProvider)
         {
             IPluginExecutionContext context = (IPluginExecutionContext)serviceProvider.GetService(typeof(IPluginExecutionContext));
@@ -81,8 +85,10 @@ namespace NGMM_AutoRegisterPlugin
             if (string.IsNullOrEmpty(messageName))
                 throw new InvalidPluginExecutionException($"Invalid Event Type: {eventTypeOsv.Value}");
 
+            EntityReference runUnderUser = ValidateRunUnderUser(service, target.GetAttributeValue<EntityReference>(RUN_UNDER_USER_FIELD));
+
             bool isUpdate = eventTypeOsv.Value == EVENT_TYPE_UPDATE;
-            RegisterPluginStep(service, sourceEntity, messageName, target.Id, startDisabled: isUpdate);
+            RegisterPluginStep(service, sourceEntity, messageName, target.Id, startDisabled: isUpdate, runUnderUser: runUnderUser);
         }
 
         private void HandleMappingUpdate(IPluginExecutionContext context, IOrganizationService service)
@@ -109,6 +115,20 @@ namespace NGMM_AutoRegisterPlugin
                 ? target.GetAttributeValue<string>("mfd_eventforsourceentity") : oldSourceEntity;
             int? newEventType = target.Contains("mfd_eventtype")
                 ? target.GetAttributeValue<OptionSetValue>("mfd_eventtype")?.Value : oldEventType;
+
+            bool stepMustBeRecreated = oldSourceEntity != newSourceEntity || oldEventType != newEventType;
+
+            // Run Under User: only touch the step when the lookup was actually sent and differs
+            // from the PreImage (or the PreImage doesn't carry it, so we can't tell). Resolved and
+            // validated BEFORE any metadata write so an invalid user aborts the save cleanly.
+            bool runUnderUserChanged = target.Contains(RUN_UNDER_USER_FIELD)
+                && (!preImage.Contains(RUN_UNDER_USER_FIELD)
+                    || !IsSameReference(target.GetAttributeValue<EntityReference>(RUN_UNDER_USER_FIELD),
+                                        preImage.GetAttributeValue<EntityReference>(RUN_UNDER_USER_FIELD)));
+
+            EntityReference runUnderUser = null;
+            if (runUnderUserChanged || stepMustBeRecreated)
+                runUnderUser = ValidateRunUnderUser(service, GetCurrentRunUnderUser(service, target, preImage));
 
             bool wroteMetadata = false;
 
@@ -143,8 +163,14 @@ namespace NGMM_AutoRegisterPlugin
             }
 
             // Nothing changed in source/type
-            if (oldSourceEntity == newSourceEntity && oldEventType == newEventType)
+            if (!stepMustBeRecreated)
             {
+                if (runUnderUserChanged && !string.IsNullOrEmpty(oldStepId) && Guid.TryParse(oldStepId, out Guid impersonationStepId))
+                {
+                    SetStepImpersonation(service, impersonationStepId, runUnderUser);
+                    wroteMetadata = true;
+                }
+
                 // Self-healing: sync PreImage attributes to minimal list on any mapping edit.
                 // Skip if we already wrote metadata in this execution (SetStepState) — Dataverse
                 // does not allow multiple metadata writes in the same plugin transaction.
@@ -170,7 +196,7 @@ namespace NGMM_AutoRegisterPlugin
 
                 bool isUpdate = newEventType == EVENT_TYPE_UPDATE;
                 bool startDisabled = !currentlyEnabled || isUpdate;
-                RegisterPluginStep(service, newSourceEntity, messageName, target.Id, startDisabled: startDisabled);
+                RegisterPluginStep(service, newSourceEntity, messageName, target.Id, startDisabled: startDisabled, runUnderUser: runUnderUser);
                 ReapplyTriggers(service, target.Id, newSourceEntity);
             }
         }
@@ -190,6 +216,61 @@ namespace NGMM_AutoRegisterPlugin
 
             if (!string.IsNullOrEmpty(stepIdStr) && Guid.TryParse(stepIdStr, out Guid stepId))
                 DeletePluginStep(service, stepId);
+        }
+
+        /// <summary>
+        /// Effective value of the Run Under User lookup after this Update:
+        /// Target (includes explicit null = cleared) -> PreImage -> database.
+        /// The database fallback covers a PreImage registered without the column; since the
+        /// column is not in the Target, the stored value is still the current one.
+        /// </summary>
+        private EntityReference GetCurrentRunUnderUser(IOrganizationService service, Entity target, Entity preImage)
+        {
+            if (target.Contains(RUN_UNDER_USER_FIELD))
+                return target.GetAttributeValue<EntityReference>(RUN_UNDER_USER_FIELD);
+
+            if (preImage != null && preImage.Contains(RUN_UNDER_USER_FIELD))
+                return preImage.GetAttributeValue<EntityReference>(RUN_UNDER_USER_FIELD);
+
+            Entity mapping = service.Retrieve(ADVANCED_MAPPING_TABLE, target.Id, new ColumnSet(RUN_UNDER_USER_FIELD));
+            return mapping.GetAttributeValue<EntityReference>(RUN_UNDER_USER_FIELD);
+        }
+
+        /// <summary>
+        /// Returns a clean systemuser reference to impersonate, or null for Calling User.
+        /// Fails the mapping save if the user no longer exists or is disabled, instead of
+        /// registering a step that would fail on every execution.
+        /// </summary>
+        private EntityReference ValidateRunUnderUser(IOrganizationService service, EntityReference userRef)
+        {
+            if (userRef == null || userRef.Id == Guid.Empty)
+                return null;
+
+            if (!string.Equals(userRef.LogicalName, "systemuser", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidPluginExecutionException($"Run Under User must reference a user (systemuser), got '{userRef.LogicalName}'.");
+
+            Entity user;
+            try
+            {
+                user = service.Retrieve("systemuser", userRef.Id, new ColumnSet("fullname", "isdisabled"));
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidPluginExecutionException($"Run Under User {userRef.Id} could not be retrieved: {ex.Message}", ex);
+            }
+
+            if (user.GetAttributeValue<bool>("isdisabled"))
+                throw new InvalidPluginExecutionException(
+                    $"Run Under User '{user.GetAttributeValue<string>("fullname")}' is disabled. Choose an active user or leave the field empty to run as the Calling User.");
+
+            return new EntityReference("systemuser", userRef.Id);
+        }
+
+        private static bool IsSameReference(EntityReference a, EntityReference b)
+        {
+            Guid idA = a?.Id ?? Guid.Empty;
+            Guid idB = b?.Id ?? Guid.Empty;
+            return idA == idB;
         }
 
         private void ReapplyTriggers(IOrganizationService service, Guid mappingId, string sourceEntityName = null)
@@ -520,11 +601,21 @@ namespace NGMM_AutoRegisterPlugin
             service.Update(step);
         }
 
+        /// <summary>
+        /// Sets the user the step runs as. null clears impersonatinguserid = Calling User.
+        /// </summary>
+        private void SetStepImpersonation(IOrganizationService service, Guid stepId, EntityReference runUnderUser)
+        {
+            Entity step = new Entity("sdkmessageprocessingstep", stepId);
+            step["impersonatinguserid"] = runUnderUser;
+            service.Update(step);
+        }
+
         #endregion
 
         #region Step Registration
 
-        private void RegisterPluginStep(IOrganizationService service, string entityName, string messageName, Guid mappingId, bool startDisabled = false)
+        private void RegisterPluginStep(IOrganizationService service, string entityName, string messageName, Guid mappingId, bool startDisabled = false, EntityReference runUnderUser = null)
         {
             if (messageName == "Manual") return;
 
@@ -554,6 +645,8 @@ namespace NGMM_AutoRegisterPlugin
             step["asyncautodelete"] = true;
             step["filteringattributes"] = "";
             step["configuration"] = mappingId.ToString();
+            if (runUnderUser != null)
+                step["impersonatinguserid"] = runUnderUser; // omitted = Calling User
 
             Guid stepId = service.Create(step);
 

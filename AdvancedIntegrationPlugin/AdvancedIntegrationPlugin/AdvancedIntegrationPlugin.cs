@@ -74,6 +74,11 @@ namespace CreateAdvancedIntegrationPlugin
 
             rootContext.SharedVariables[loopKey] = true;
 
+            // [RUN UNDER USER] context.UserId is the step's "Run in User's Context":
+            //   - impersonatinguserid set (mfd_rununderuser on the mapping) -> that user / service account
+            //   - impersonatinguserid empty                                -> the Calling User
+            // context.InitiatingUserId is always the human/app that made the original request.
+            // Do NOT pass InitiatingUserId (or null = SYSTEM) here, or the impersonation is lost.
             IOrganizationServiceFactory serviceFactory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
             IOrganizationService service = serviceFactory.CreateOrganizationService(context.UserId);
 
@@ -144,6 +149,8 @@ namespace CreateAdvancedIntegrationPlugin
                 isEnabled = mappingRecord.GetAttributeValue<bool?>("mfd_enabled") ?? true;
                 if (!isEnabled)
                     return;
+
+                AppendExecutionIdentity(context, mappingRecord, errorLog);
 
                 // ===========================================================================
                 // [CHANGE DETECTION]
@@ -515,6 +522,26 @@ namespace CreateAdvancedIntegrationPlugin
         }
 
         #endregion
+
+        /// [RUN UNDER USER] Logs who the integration runs as and flags a step that is out of
+        /// sync with the mapping (e.g. step edited by hand, or AutoRegisterPlugin failed).
+        /// Warning only: never falls back to InitiatingUserId, since silently running with
+        /// the caller's (lower) privileges is exactly what Run Under User is meant to avoid.
+        private void AppendExecutionIdentity(IPluginExecutionContext context, Entity mappingRecord, StringBuilder errorLog)
+        {
+            bool impersonated = context.UserId != context.InitiatingUserId;
+            errorLog.AppendLine(impersonated
+                ? $"Running as     : {context.UserId} (impersonated, initiated by {context.InitiatingUserId})"
+                : $"Running as     : {context.UserId} (Calling User)");
+
+            // Lookup not present in ColumnSet/entity -> nothing to compare against.
+            if (!mappingRecord.Contains("mfd_rununderuser"))
+                return;
+
+            Guid expectedUserId = mappingRecord.GetAttributeValue<EntityReference>("mfd_rununderuser")?.Id ?? Guid.Empty;
+            if (expectedUserId != Guid.Empty && expectedUserId != context.UserId)
+                errorLog.AppendLine($"WARNING: mapping Run Under User is {expectedUserId} but step ran as {context.UserId}. Re-save the mapping to resync the step.");
+        }
 
         #region Get Mapping Record
 
